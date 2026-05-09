@@ -72,7 +72,6 @@ export default function GuestEntry() {
                 <Scanner 
                   onScan={handleScan}
                   components={{
-                    audio: false,
                     onOff: true,
                     torch: true,
                     zoom: true,
