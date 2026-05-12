@@ -18,12 +18,13 @@ if (!fs.existsSync(DB_PATH)) {
 export interface EventImage {
   id: string;
   url: string;
-  descriptors: number[][]; // Face descriptors
+  descriptors: any[]; // Array of descriptor objects containing embedding, emotion, box, etc.
 }
 
 export interface EventData {
   id: string;
   name: string;
+  pin?: string;
   images: EventImage[];
 }
 
@@ -41,14 +42,14 @@ export const getEvent = (id: string): EventData | null => {
   return db.events[id] || null;
 };
 
-export const createEvent = (id: string, name: string) => {
+export const createEvent = (id: string, name: string, pin?: string) => {
   const db = getDb();
-  db.events[id] = { id, name, images: [] };
+  db.events[id] = { id, name, pin, images: [] };
   saveDb(db);
   return db.events[id];
 };
 
-export const addImageToEvent = (eventId: string, imageUrl: string, descriptors: number[][]) => {
+export const addImageToEvent = (eventId: string, imageUrl: string, descriptors: any[]) => {
   const db = getDb();
   if (!db.events[eventId]) return null;
   

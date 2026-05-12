@@ -47,6 +47,17 @@ export default function Gallery({ params }: { params: Promise<{ id: string }> })
     }
   };
 
+  const handleNotMe = (photoId: string) => {
+    console.log(`Feedback received: Photo ${photoId} is a false positive.`);
+    setPhotos(prev => prev.filter(p => p.id !== photoId));
+    const stored = sessionStorage.getItem(`matches-${id}`);
+    if (stored) {
+      const parsed = JSON.parse(stored);
+      const updated = parsed.filter((p: any) => p.id !== photoId);
+      sessionStorage.setItem(`matches-${id}`, JSON.stringify(updated));
+    }
+  };
+
   return (
     <div className="min-h-screen bg-slate-50 flex flex-col">
       <header className="sticky top-0 z-50 bg-white/80 backdrop-blur-md border-b border-slate-200 py-4 px-6 flex justify-between items-center shadow-sm">
@@ -110,11 +121,22 @@ export default function Gallery({ params }: { params: Promise<{ id: string }> })
                   }`}
                   style={{ transitionDelay: `${index * 100}ms` }}
                 >
-                  <div className="absolute top-4 right-4 z-10">
+                  <div className="absolute top-4 right-4 z-10 flex flex-col gap-2 items-end">
                     <div className="bg-white/90 backdrop-blur px-2 py-1 rounded-lg text-[10px] font-bold text-primary-700 shadow-sm border border-primary-100 flex items-center gap-1">
                       <Sparkles className="w-3 h-3" />
                       {photo.confidence}% Match
                     </div>
+                    {photo.emotion && photo.emotion !== 'neutral' && (
+                      <div className="bg-white/90 backdrop-blur px-2 py-1 rounded-lg text-[10px] font-bold text-pink-600 shadow-sm border border-pink-100 flex items-center gap-1">
+                        {photo.emotion === 'happy' && '😄 Happy Moment'}
+                        {photo.emotion === 'surprised' && '😲 Surprised'}
+                        {photo.emotion === 'angry' && '😠 Intense'}
+                        {photo.emotion === 'sad' && '🥺 Emotional'}
+                        {photo.emotion === 'fearful' && '😨 Spooked'}
+                        {photo.emotion === 'disgusted' && '😖 Eww'}
+                        {photo.emotion === 'neutral' && ''}
+                      </div>
+                    )}
                   </div>
                   <img 
                     src={photo.url} 
@@ -124,9 +146,18 @@ export default function Gallery({ params }: { params: Promise<{ id: string }> })
                   />
                   <div className="absolute inset-0 bg-gradient-to-t from-slate-900/60 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300"></div>
                   <div className="absolute bottom-0 left-0 right-0 p-4 flex justify-between items-end opacity-0 group-hover:opacity-100 transition-opacity duration-300 translate-y-2 group-hover:translate-y-0">
-                    <button className="w-10 h-10 bg-white/20 hover:bg-white/40 backdrop-blur-md text-white rounded-full flex items-center justify-center transition-colors">
-                      <Heart className="w-5 h-5" />
-                    </button>
+                    <div className="flex gap-2">
+                      <button 
+                        onClick={() => handleNotMe(photo.id)}
+                        title="Not Me"
+                        className="w-10 h-10 bg-white/20 hover:bg-red-500/80 backdrop-blur-md text-white rounded-full flex items-center justify-center transition-colors"
+                      >
+                        <span className="text-xs font-bold">✕</span>
+                      </button>
+                      <button className="w-10 h-10 bg-white/20 hover:bg-white/40 backdrop-blur-md text-white rounded-full flex items-center justify-center transition-colors">
+                        <Heart className="w-5 h-5" />
+                      </button>
+                    </div>
                     <a 
                       href={photo.url}
                       download

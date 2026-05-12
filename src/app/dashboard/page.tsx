@@ -12,6 +12,7 @@ export default function Dashboard() {
   const [isProcessing, setIsProcessing] = useState(false);
   const [progress, setProgress] = useState(0);
   const [eventId, setEventId] = useState<string | null>(null);
+  const [eventPin, setEventPin] = useState<string | null>(null);
   const [files, setFiles] = useState<File[]>([]);
   const [processedCount, setProcessedCount] = useState(0);
   const [originUrl, setOriginUrl] = useState("");
@@ -49,6 +50,7 @@ export default function Dashboard() {
 
       const data = await response.json();
       const newEventId = data.eventId;
+      const newEventPin = data.eventPin;
       const uploadedImages = data.images;
       
       setProgress(30);
@@ -87,6 +89,7 @@ export default function Dashboard() {
       }
 
       setEventId(newEventId);
+      setEventPin(newEventPin);
     } catch (error) {
       console.error("Upload error:", error);
       alert("Failed to upload photos. Please try again.");
@@ -258,6 +261,16 @@ export default function Dashboard() {
                 </div>
 
                 <div>
+                  <p className="text-xs font-medium text-slate-500 uppercase tracking-wider mb-1">Guest Access PIN</p>
+                  <div className="flex items-center gap-2">
+                    <code className="bg-primary-50 px-3 py-1.5 rounded-lg border border-primary-200 text-lg font-bold text-primary-700 tracking-widest shadow-sm">
+                      {eventPin}
+                    </code>
+                  </div>
+                  <p className="text-xs text-slate-500 mt-1">Guests will need this PIN to enter the gallery.</p>
+                </div>
+
+                <div>
                   <p className="text-xs font-medium text-slate-500 uppercase tracking-wider mb-2">Guest Link</p>
                   <div className="flex gap-2">
                     <input 
@@ -296,6 +309,7 @@ export default function Dashboard() {
               <button
                 onClick={() => {
                   setEventId(null);
+                  setEventPin(null);
                   setFiles([]);
                   setEventName("");
                   setProgress(0);

@@ -4,7 +4,7 @@ import { useState, use, useRef, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { Camera, Upload, UserRound, ArrowRight, Loader2, Image as ImageIcon, Search } from "lucide-react";
 import Link from "next/link";
-import { getFaceDescriptor } from "@/lib/face-api";
+import { getFaceDescriptor, checkImageQuality } from "@/lib/face-api";
 
 export default function GuestUpload({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
@@ -16,6 +16,10 @@ export default function GuestUpload({ params }: { params: Promise<{ id: string }
     right: null as string | null,
   });
   const [isProcessing, setIsProcessing] = useState(false);
+  const [isAuthorized, setIsAuthorized] = useState(false);
+  const [pin, setPin] = useState("");
+  const [isVerifying, setIsVerifying] = useState(false);
+  const [pinError, setPinError] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const fileInputRefs = {
@@ -52,6 +56,32 @@ export default function GuestUpload({ params }: { params: Promise<{ id: string }
 
   const canSubmit = selfies.front !== null;
 
+  const handleVerify = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (pin.length < 6) return;
+    
+    setIsVerifying(true);
+    setPinError(null);
+
+    try {
+      const response = await fetch(`/api/event/${id}/verify`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ pin })
+      });
+
+      if (!response.ok) {
+        throw new Error("Incorrect PIN. Please try again.");
+      }
+
+      setIsAuthorized(true);
+    } catch (err: any) {
+      setPinError(err.message);
+    } finally {
+      setIsVerifying(false);
+    }
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!canSubmit || !selfies.frontFile) return;
@@ -60,11 +90,35 @@ export default function GuestUpload({ params }: { params: Promise<{ id: string }
     setError(null);
 
     try {
-      // 1. Get face descriptor from the front selfie
-      const descriptor = await getFaceDescriptor(selfies.frontFile);
+      // 1. Get face descriptors from the selfies
+      const descriptors = [];
       
-      if (!descriptor) {
-        throw new Error("No face detected in your selfie. Please try again with a clearer photo.");
+      const frontDescriptor = await getFaceDescriptor(selfies.frontFile);
+      if (!frontDescriptor) {
+        throw new Error("No face detected in your front selfie. Please try again with a clearer photo.");
+      }
+      
+      // Perform Blur & Quality Detection (Feature #4)
+      // We need to create an image element to check the blur
+      const img = new Image();
+      img.src = selfies.front as string;
+      await new Promise((resolve) => (img.onload = resolve));
+      
+      const quality = checkImageQuality(img, frontDescriptor);
+      if (!quality.isGood) {
+        throw new Error(quality.error || "Poor image quality");
+      }
+      
+      descriptors.push(frontDescriptor);
+
+      if (selfies.leftFile) {
+        const leftDescriptor = await getFaceDescriptor(selfies.leftFile);
+        if (leftDescriptor) descriptors.push(leftDescriptor);
+      }
+
+      if (selfies.rightFile) {
+        const rightDescriptor = await getFaceDescriptor(selfies.rightFile);
+        if (rightDescriptor) descriptors.push(rightDescriptor);
       }
 
       // 2. Call the match API
@@ -73,7 +127,8 @@ export default function GuestUpload({ params }: { params: Promise<{ id: string }
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           eventId: id,
-          selfieDescriptor: descriptor
+          selfieDescriptors: descriptors,
+          selfieImageBase64: selfies.front // Send to backend for Python ArcFace
         })
       });
 
@@ -128,11 +183,52 @@ export default function GuestUpload({ params }: { params: Promise<{ id: string }
         </div>
       </header>
 
-      <main className="flex-1 max-w-3xl w-full mx-auto p-6 py-12">
-        <div className="text-center mb-10">
-          <h1 className="text-3xl md:text-4xl font-display font-bold text-slate-900 mb-4">Let's find you!</h1>
+      {!isAuthorized ? (
+        <main className="flex-1 w-full max-w-md mx-auto p-6 py-20 flex flex-col items-center justify-center">
+          <div className="bg-white w-full p-8 rounded-3xl shadow-sm border border-slate-200 text-center space-y-6">
+            <div className="w-16 h-16 bg-primary-50 text-primary-600 rounded-full flex items-center justify-center mx-auto mb-2">
+              <Camera className="w-8 h-8" />
+            </div>
+            
+            <div>
+              <h1 className="text-2xl font-display font-bold text-slate-900">Private Gallery</h1>
+              <p className="text-sm text-slate-500 mt-2">Enter the 6-digit access PIN provided by your photographer to find your photos.</p>
+            </div>
+
+            {pinError && (
+              <div className="p-3 bg-red-50 border border-red-100 text-red-600 rounded-lg text-sm font-medium">
+                {pinError}
+              </div>
+            )}
+
+            <form onSubmit={handleVerify} className="space-y-6">
+              <div>
+                <input
+                  type="text"
+                  maxLength={6}
+                  placeholder="------"
+                  value={pin}
+                  onChange={(e) => setPin(e.target.value.replace(/[^0-9]/g, ''))}
+                  className="w-full text-center text-3xl tracking-[1em] py-4 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 font-bold text-slate-700 placeholder-slate-300"
+                  required
+                />
+              </div>
+              <button
+                type="submit"
+                disabled={pin.length < 6 || isVerifying}
+                className="w-full py-4 bg-primary-600 hover:bg-primary-700 disabled:bg-slate-200 disabled:text-slate-400 text-white rounded-xl font-bold transition-all flex items-center justify-center gap-2 shadow-lg shadow-primary-600/20"
+              >
+                {isVerifying ? <Loader2 className="w-5 h-5 animate-spin" /> : "Access Gallery"}
+              </button>
+            </form>
+          </div>
+        </main>
+      ) : (
+        <main className="flex-1 max-w-3xl w-full mx-auto p-6 py-12 animate-in fade-in zoom-in-95 duration-500">
+          <div className="text-center mb-10">
+            <h1 className="text-3xl md:text-4xl font-display font-bold text-slate-900 mb-4">Let's find you!</h1>
           <p className="text-slate-600 max-w-lg mx-auto">
-            Upload a clear front-facing selfie to start the search.
+            Upload a clear front-facing selfie to start the search. Add profile shots for even better accuracy!
           </p>
         </div>
 
@@ -188,14 +284,89 @@ export default function GuestUpload({ params }: { params: Promise<{ id: string }
               </div>
             </div>
 
-            {/* Placeholder for real world feel */}
-            <div className="flex flex-col gap-3 opacity-50 cursor-not-allowed hidden md:flex">
-              <label className="text-sm font-medium text-slate-400 flex items-center gap-2">
-                <span className="w-6 h-6 rounded-full bg-slate-100 text-slate-300 flex items-center justify-center text-xs">2</span>
-                Profile (Soon)
+            {/* Left Profile (Optional) */}
+            <div className="flex flex-col gap-3">
+              <label className="text-sm font-medium text-slate-700 flex items-center gap-2">
+                <span className="w-6 h-6 rounded-full bg-slate-100 text-slate-700 flex items-center justify-center text-xs">2</span>
+                Left Profile <span className="text-slate-400 font-normal text-xs">(Optional)</span>
               </label>
-              <div className="relative aspect-[3/4] rounded-2xl border-2 border-dashed border-slate-200 bg-slate-50/50 flex flex-col items-center justify-center">
-                <UserRound className="w-10 h-10 text-slate-200" />
+              
+              <div 
+                onClick={() => !selfies.left && triggerInput("left")}
+                className={`relative aspect-[3/4] rounded-2xl overflow-hidden border-2 transition-all ${
+                  selfies.left 
+                    ? "border-primary-500 shadow-md" 
+                    : "border-dashed border-slate-300 hover:border-primary-400 hover:bg-slate-50 cursor-pointer bg-white"
+                }`}
+              >
+                {selfies.left ? (
+                  <>
+                    <img src={selfies.left} alt="Left profile selfie" className="w-full h-full object-cover" />
+                    <button 
+                      type="button"
+                      onClick={(e) => { e.stopPropagation(); removeSelfie("left"); }}
+                      className="absolute top-2 right-2 w-8 h-8 bg-white/80 backdrop-blur text-slate-700 rounded-full flex items-center justify-center hover:bg-white hover:text-red-500 shadow-sm transition-colors"
+                    >
+                      ×
+                    </button>
+                  </>
+                ) : (
+                  <div className="absolute inset-0 flex flex-col items-center justify-center p-4 text-center">
+                    <UserRound className="w-10 h-10 text-slate-400 mb-3" />
+                    <p className="text-sm font-medium text-slate-700">Tap to upload</p>
+                    <p className="text-xs text-slate-500 mt-1">Look left</p>
+                  </div>
+                )}
+                <input 
+                  type="file" 
+                  ref={fileInputRefs.left} 
+                  onChange={(e) => handleFileChange("left", e)} 
+                  accept="image/*" 
+                  className="hidden" 
+                />
+              </div>
+            </div>
+
+            {/* Right Profile (Optional) */}
+            <div className="flex flex-col gap-3">
+              <label className="text-sm font-medium text-slate-700 flex items-center gap-2">
+                <span className="w-6 h-6 rounded-full bg-slate-100 text-slate-700 flex items-center justify-center text-xs">3</span>
+                Right Profile <span className="text-slate-400 font-normal text-xs">(Optional)</span>
+              </label>
+              
+              <div 
+                onClick={() => !selfies.right && triggerInput("right")}
+                className={`relative aspect-[3/4] rounded-2xl overflow-hidden border-2 transition-all ${
+                  selfies.right 
+                    ? "border-primary-500 shadow-md" 
+                    : "border-dashed border-slate-300 hover:border-primary-400 hover:bg-slate-50 cursor-pointer bg-white"
+                }`}
+              >
+                {selfies.right ? (
+                  <>
+                    <img src={selfies.right} alt="Right profile selfie" className="w-full h-full object-cover" />
+                    <button 
+                      type="button"
+                      onClick={(e) => { e.stopPropagation(); removeSelfie("right"); }}
+                      className="absolute top-2 right-2 w-8 h-8 bg-white/80 backdrop-blur text-slate-700 rounded-full flex items-center justify-center hover:bg-white hover:text-red-500 shadow-sm transition-colors"
+                    >
+                      ×
+                    </button>
+                  </>
+                ) : (
+                  <div className="absolute inset-0 flex flex-col items-center justify-center p-4 text-center">
+                    <UserRound className="w-10 h-10 text-slate-400 mb-3" />
+                    <p className="text-sm font-medium text-slate-700">Tap to upload</p>
+                    <p className="text-xs text-slate-500 mt-1">Look right</p>
+                  </div>
+                )}
+                <input 
+                  type="file" 
+                  ref={fileInputRefs.right} 
+                  onChange={(e) => handleFileChange("right", e)} 
+                  accept="image/*" 
+                  className="hidden" 
+                />
               </div>
             </div>
           </div>
@@ -213,6 +384,7 @@ export default function GuestUpload({ params }: { params: Promise<{ id: string }
           </div>
         </form>
       </main>
+      )}
     </div>
   );
 }

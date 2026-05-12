@@ -15,7 +15,9 @@ export async function POST(req: NextRequest) {
     }
 
     const eventId = uuidv4().substring(0, 8);
-    createEvent(eventId, eventName);
+    // Generate a secure 6-digit PIN for guest access
+    const eventPin = Math.floor(100000 + Math.random() * 900000).toString();
+    createEvent(eventId, eventName, eventPin);
 
     const uploadDir = path.join(process.cwd(), 'data', 'uploads', eventId);
     await fs.mkdir(uploadDir, { recursive: true });
@@ -32,15 +34,29 @@ export async function POST(req: NextRequest) {
       
       const imageUrl = `/api/image?eventId=${eventId}&file=${fileName}`;
       
-      // In a real world app, we would process embeddings here.
-      // For this "ready to use" project, we'll store the images first.
-      // The browser will later extract embeddings if we don't have a heavy backend.
-      // However, to make it "ready to use", I'll add the image to the DB.
       const image = addImageToEvent(eventId, imageUrl, []);
       savedImages.push(image);
+
+      // --- FAISS & ArcFace Pipeline Integration ---
+      // Attempt to send the image to the Python microservice for indexing
+      try {
+        const pyFormData = new FormData();
+        // Create a blob from the buffer to send via FormData
+        const blob = new Blob([buffer], { type: file.type });
+        pyFormData.append("file", blob, file.name);
+        
+        await fetch(`http://localhost:8000/api/v1/index/${eventId}?image_id=${image?.id}`, {
+          method: 'POST',
+          body: pyFormData
+        });
+        console.log(`Successfully indexed ${file.name} in FAISS`);
+      } catch (err) {
+        // Python server not running, gracefully fallback to browser-based face-api.js
+        console.warn(`FAISS Backend offline. Falling back to browser ML for ${file.name}`);
+      }
     }
 
-    return NextResponse.json({ eventId, eventName, images: savedImages });
+    return NextResponse.json({ eventId, eventPin, eventName, images: savedImages });
   } catch (error) {
     console.error('Upload error:', error);
     return NextResponse.json({ error: 'Failed to upload images' }, { status: 500 });
