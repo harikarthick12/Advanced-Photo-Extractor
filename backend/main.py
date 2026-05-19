@@ -8,6 +8,8 @@ import insightface
 from insightface.app import FaceAnalysis
 import faiss
 import io
+import os
+import pickle
 from PIL import Image
 
 app = FastAPI(title="APE Engine", description="Advanced Photo Extractor ML Microservice")
@@ -30,6 +32,20 @@ try:
 except Exception as e:
     print(f"Warning: InsightFace not fully loaded (Needs models). Error: {e}")
 
+# --- Load SVM Verification Model ---
+svm_model = None
+current_dir = os.path.dirname(os.path.abspath(__file__))
+svm_model_path = os.path.join(current_dir, 'svm_model.pkl')
+if os.path.exists(svm_model_path):
+    try:
+        with open(svm_model_path, 'rb') as f:
+            svm_model = pickle.load(f)
+        print("Loaded SVM verification model.")
+    except Exception as e:
+        print(f"Failed to load SVM model: {e}")
+else:
+    print("SVM model not found. Run svm_trainer.py to generate it.")
+
 # In-memory FAISS indices per event (for demonstration)
 # In production, use Redis or a persistent vector DB (Pinecone, Milvus)
 event_indices = {}
@@ -38,6 +54,10 @@ event_images = {} # Maps internal ID to image URL/Metadata
 class MatchRequest(BaseModel):
     event_id: str
     threshold: float = 0.55
+
+class SVMVerifyRequest(BaseModel):
+    query_descriptor: list[float]
+    gallery_descriptors: list[list[float]]
 
 def read_imagefile(file) -> np.ndarray:
     image = Image.open(io.BytesIO(file))
@@ -147,6 +167,33 @@ async def search_faces(event_id: str, file: UploadFile = File(...)):
     unique_matches = {v['image_id']: v for v in matches}.values()
             
     return {"matches": list(unique_matches)}
+
+@app.post("/api/v1/svm_verify")
+async def svm_verify(req: SVMVerifyRequest):
+    """
+    Uses the trained SVM model to verify 128-dimensional face embeddings.
+    """
+    if not svm_model:
+        raise HTTPException(status_code=503, detail="SVM model not loaded")
+        
+    try:
+        q_emb = np.array(req.query_descriptor, dtype=np.float32)
+        confidences = []
+        
+        for g_emb_list in req.gallery_descriptors:
+            g_emb = np.array(g_emb_list, dtype=np.float32)
+            # Calculate absolute difference for the SVM input
+            diff = np.abs(q_emb - g_emb).reshape(1, -1)
+            
+            # Predict probability
+            prob = svm_model.predict_proba(diff)[0]
+            # prob[1] is the probability of class 1 (match)
+            match_prob = float(prob[1])
+            confidences.append(match_prob)
+            
+        return {"confidences": confidences}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 if __name__ == "__main__":
     uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)

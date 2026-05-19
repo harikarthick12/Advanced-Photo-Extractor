@@ -199,6 +199,47 @@ export async function POST(req: NextRequest) {
       })
       .filter((img: any) => img !== null);
 
+    // --- SVM Verification Layer ---
+    if (matchedImages.length > 0) {
+      try {
+        const galleryDescriptors = matchedImages.map((img: any) => Array.from(img.bestDescriptor));
+        const qDesc = Array.from(queryDescriptor);
+
+        const svmRes = await fetch('http://localhost:8000/api/v1/svm_verify', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            query_descriptor: qDesc,
+            gallery_descriptors: galleryDescriptors
+          })
+        });
+
+        if (svmRes.ok) {
+          const svmData = await svmRes.json();
+          const confidences = svmData.confidences;
+
+          matchedImages.forEach((img: any, index: number) => {
+            const svmConfidence = confidences[index];
+            img.svmConfidence = svmConfidence;
+
+            // Refine rankScore based on SVM confidence
+            if (svmConfidence > 0.7) {
+              img.rankScore += (svmConfidence * 20);
+            } else if (svmConfidence < 0.4) {
+              // Low confidence, penalize score but fallback to Euclidean is maintained
+              img.rankScore -= ((1 - svmConfidence) * 20);
+            }
+          });
+          console.log("SVM verification applied successfully.");
+        } else {
+          console.warn("SVM backend returned error. Falling back to Euclidean.");
+        }
+      } catch (err) {
+        console.warn("SVM verification failed or offline. Falling back to Euclidean-only matching...", err);
+      }
+    }
+    // --- End SVM Verification Layer ---
+
     // Feature 10: Duplicate Removal
     // If two images have nearly identical facial descriptors (distance < 0.1), they are burst shots. Keep the one with the higher rank score.
     const uniqueMatches: any[] = [];
